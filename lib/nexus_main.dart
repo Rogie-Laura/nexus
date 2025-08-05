@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'connection_type.dart';
@@ -8,6 +9,7 @@ import 'get_location.dart';
 import 'dart:async';
 import 'nexus_service.dart';
 import 'run_background.dart';
+import 'txt_checking.dart';
 
 class NexusApp extends StatelessWidget {
   const NexusApp({super.key});
@@ -42,6 +44,9 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
   final tokenController = TextEditingController();
   final deploymentController = TextEditingController();
 
+  final tokenFocusNode = FocusNode();
+  final deploymentFocusNode = FocusNode();
+
   String _connectionType = '';
   String _connectionStrength = '';
   String _batteryStatus = '';
@@ -54,15 +59,28 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
   Timer? _signalTimer;
 
   String _countdownText = '';
-  bool _isProcessing = false;
 
   @override
   void initState() {
     super.initState();
     _loadStatus();
+
+    tokenController.addListener(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('token', tokenController.text);
+    });
+
+    deploymentController.addListener(() async {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('deploymentID', deploymentController.text);
+    });
   }
 
   Future<void> _loadStatus() async {
+    final prefs = await SharedPreferences.getInstance();
+    tokenController.text = prefs.getString('token') ?? '';
+    deploymentController.text = prefs.getString('deploymentID') ?? '';
+
     final type = await getConnectionType();
     final strength = await getSignalStrength();
     final battery = await getBatteryStatus();
@@ -79,6 +97,95 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
   }
 
   Future<void> _handleLoginLogout() async {
+    final token = tokenController.text.trim();
+    final deployment = deploymentController.text.trim();
+
+    if (!areFieldsValid(
+      context: context,
+      token: token,
+      deployment: deployment,
+      tokenFocusNode: tokenFocusNode,
+      deploymentFocusNode: deploymentFocusNode,
+    ))
+      return;
+
+    // ✅ STOP confirmation (runs immediately — no countdown)
+    if (_isLoggedIn) {
+      final stopConfirm = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: Colors.grey[900],
+          title: const Text(
+            'Stop Operation?',
+            style: TextStyle(color: Colors.white),
+          ),
+          content: const Text(
+            'Are you sure you want to Stop the Current Operation?',
+            style: TextStyle(color: Colors.white70),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text(
+                'Yes, Stop',
+                style: TextStyle(color: Colors.red),
+              ),
+            ),
+          ],
+        ),
+      );
+
+      if (stopConfirm != true) {
+        setState(() {
+          _buttonDisabled = false;
+          _countdownText = '';
+        });
+        return;
+      }
+
+      await logoutFromNexus();
+      stopSendingLocation();
+      stopTimers();
+      setState(() {
+        _isLoggedIn = false;
+        _buttonDisabled = false;
+      });
+      return; // ✅ Exit here so login logic doesn’t run
+    }
+
+    // ✅ LOGIN confirmation (with countdown after confirmation)
+    final confirm = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: Colors.grey[900],
+        title: const Text(
+          'Confirm Login',
+          style: TextStyle(color: Colors.white),
+        ),
+        content: Text(
+          'Log to Nexus Server?\n\nDeployment ID: $deployment',
+          style: const TextStyle(color: Colors.white70),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No', style: TextStyle(color: Colors.red)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes', style: TextStyle(color: Colors.green)),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm != true) return;
+
+    // 🕒 Countdown for login
     setState(() {
       _buttonDisabled = true;
       _countdownText = 'Enabling in 3...';
@@ -91,29 +198,20 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
     await Future.delayed(const Duration(seconds: 1));
     setState(() => _countdownText = '');
 
-    if (_isLoggedIn) {
-      await logoutFromNexus();
-      stopSendingLocation();
-      stopTimers();
-      setState(() {
-        _isLoggedIn = false;
-        _buttonDisabled = false;
-      });
-    } else {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('token', tokenController.text);
-      await prefs.setString('deploymentID', deploymentController.text);
+    // ✅ Continue login logic
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('token', token);
+    await prefs.setString('deploymentID', deployment);
 
-      await loginToNexus();
-      await _loadStatus();
-      await startSendingLocation();
-      startTimers();
+    await loginToNexus();
+    await _loadStatus();
+    await startSendingLocation();
+    startTimers();
 
-      setState(() {
-        _isLoggedIn = true;
-        _buttonDisabled = false;
-      });
-    }
+    setState(() {
+      _isLoggedIn = true;
+      _buttonDisabled = false;
+    });
   }
 
   void startTimers() {
@@ -122,7 +220,7 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
     _signalTimer?.cancel();
 
     _locationTimer = Timer.periodic(const Duration(seconds: 3), (_) async {
-      await updateLocation(); // this already includes lat/lng logging if needed
+      await updateLocation();
     });
 
     _batteryTimer = Timer.periodic(const Duration(seconds: 180), (_) async {
@@ -138,7 +236,7 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
         _connectionType = type;
       });
       print('📶 Signal: $signal');
-      print('📶 Signal: $type');
+      print('📶 Type: $type');
     });
   }
 
@@ -153,100 +251,112 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
     stopTimers();
     tokenController.dispose();
     deploymentController.dispose();
+    tokenFocusNode.dispose();
+    deploymentFocusNode.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      resizeToAvoidBottomInset: false,
-      appBar: AppBar(
-        backgroundColor: Colors.black,
-        title: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Image.asset('assets/pnp_logo.png', height: 40),
-            const Text('NEXUS LOGIN'),
-            Image.asset('assets/pro4a_logo.png', height: 40),
-          ],
-        ),
-      ),
-      body: GestureDetector(
-        onTap: () => FocusScope.of(context).unfocus(),
-        child: Padding(
-          padding: const EdgeInsets.all(24.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    return WillPopScope(
+      onWillPop: () async {
+        const platform = MethodChannel('android_app_retain');
+        try {
+          await platform.invokeMethod('moveToBackground');
+        } on PlatformException catch (e) {
+          print("❌ Failed to move to background: ${e.message}");
+        }
+        return false;
+      },
+      child: Scaffold(
+        resizeToAvoidBottomInset: false,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          title: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              const SizedBox(height: 40),
-              TextField(
-                controller: tokenController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(hintText: 'Enter your Token'),
-              ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: deploymentController,
-                style: const TextStyle(color: Colors.white),
-                decoration: const InputDecoration(
-                  hintText: 'Enter Deployment ID',
-                ),
-              ),
-              const SizedBox(height: 30),
-              SizedBox(
-                height: 60,
-                child: ElevatedButton(
-                  onPressed: _buttonDisabled ? null : _handleLoginLogout,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: _isLoggedIn ? Colors.red : Colors.teal,
-                  ),
-                  child: Text(
-                    _isLoggedIn
-                        ? 'Stop Operation'
-                        : (_countdownText.isEmpty
-                              ? 'Log in to Nexus'
-                              : _countdownText),
-                    style: const TextStyle(fontSize: 20),
-                  ),
-                ),
-              ),
-
-              const SizedBox(height: 30),
-              Card(
-                color: Colors.grey[900],
-                elevation: 4,
-                child: Padding(
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // Text(
-                      //   'Connection Type: $_connectionType',
-                      //   style: const TextStyle(color: Colors.white),
-                      //  ),
-                      Text(
-                        'Connection Status: $_connectionStrength',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      Text(
-                        'Battery Status: $_batteryStatus',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                      Text(
-                        'Location Accuracy: $_locationAccuracy',
-                        style: const TextStyle(color: Colors.white),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const Spacer(),
-              const Text(
-                'v1.0.0',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white38),
-              ),
+              Image.asset('assets/pnp_logo.png', height: 40),
+              const Text('Project Nexus'),
+              Image.asset('assets/pro4a_logo.png', height: 40),
             ],
+          ),
+        ),
+        body: GestureDetector(
+          onTap: () => FocusScope.of(context).unfocus(),
+          child: Padding(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                const SizedBox(height: 40),
+                TextField(
+                  controller: tokenController,
+                  focusNode: tokenFocusNode,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    hintText: 'Enter your Token',
+                  ),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: deploymentController,
+                  focusNode: deploymentFocusNode,
+                  style: const TextStyle(color: Colors.white),
+                  decoration: const InputDecoration(
+                    hintText: 'Enter Deployment ID',
+                  ),
+                ),
+                const SizedBox(height: 30),
+                SizedBox(
+                  height: 60,
+                  child: ElevatedButton(
+                    onPressed: _buttonDisabled ? null : _handleLoginLogout,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _isLoggedIn ? Colors.red : Colors.teal,
+                    ),
+                    child: Text(
+                      _isLoggedIn
+                          ? 'Stop Operation'
+                          : (_countdownText.isEmpty
+                                ? 'Log in to Nexus'
+                                : _countdownText),
+                      style: const TextStyle(fontSize: 20),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 30),
+                Card(
+                  color: Colors.grey[900],
+                  elevation: 4,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Connection Status: $_connectionStrength',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        Text(
+                          'Battery Status: $_batteryStatus',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                        Text(
+                          'Location Accuracy: $_locationAccuracy',
+                          style: const TextStyle(color: Colors.white),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const Spacer(),
+                const Text(
+                  'DEVELOPED BY RCC4A AND RICTMD4A',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: Color.fromARGB(95, 130, 227, 242)),
+                ),
+              ],
+            ),
           ),
         ),
       ),

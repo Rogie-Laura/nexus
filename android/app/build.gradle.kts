@@ -7,7 +7,7 @@ plugins {
 
 android {
     namespace = "com.example.nexus_v2"
-    compileSdk = flutter.compileSdkVersion
+    compileSdk = 35
     ndkVersion = "27.0.12077973"
 
     compileOptions {
@@ -22,7 +22,7 @@ android {
     defaultConfig {
     applicationId = "com.example.nexus_v2"
     minSdk = 23 // 🔥 Force it to API 23 to support flutter_foreground_task
-    targetSdk = flutter.targetSdkVersion
+    targetSdk = 35
     versionCode = flutter.versionCode
     versionName = flutter.versionName
     }
