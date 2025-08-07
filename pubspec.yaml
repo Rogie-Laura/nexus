@@ -37,6 +37,8 @@ dependencies:
   connectivity_plus: ^6.0.3
   location: ^8.0.1
   flutter_foreground_task: 7.1.0
+  internet_connection_checker: ^1.0.0+1
+  permission_handler: ^11.3.0
 
 
   # The following adds the Cupertino Icons font to your application.

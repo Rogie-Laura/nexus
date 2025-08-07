@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'nexus_main.dart';
+import 'crash_handler.dart';
 
-void main() {
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  await handleCrashRecovery(); // ✅ Auto-logout if previous crash
 
   FlutterForegroundTask.init(
     androidNotificationOptions: AndroidNotificationOptions(

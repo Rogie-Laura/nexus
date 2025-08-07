@@ -10,6 +10,7 @@ import 'dart:async';
 import 'nexus_service.dart';
 import 'run_background.dart';
 import 'txt_checking.dart';
+import 'log.dart';
 
 class NexusApp extends StatelessWidget {
   const NexusApp({super.key});
@@ -57,6 +58,7 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
   Timer? _locationTimer;
   Timer? _batteryTimer;
   Timer? _signalTimer;
+  bool _textFieldsEnabled = true;
 
   String _countdownText = '';
 
@@ -93,124 +95,6 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
       _locationAccuracy = accuracy >= 0
           ? '${accuracy.toStringAsFixed(1)} m'
           : 'Unavailable';
-    });
-  }
-
-  Future<void> _handleLoginLogout() async {
-    final token = tokenController.text.trim();
-    final deployment = deploymentController.text.trim();
-
-    if (!areFieldsValid(
-      context: context,
-      token: token,
-      deployment: deployment,
-      tokenFocusNode: tokenFocusNode,
-      deploymentFocusNode: deploymentFocusNode,
-    ))
-      return;
-
-    // ✅ STOP confirmation (runs immediately — no countdown)
-    if (_isLoggedIn) {
-      final stopConfirm = await showDialog<bool>(
-        context: context,
-        builder: (ctx) => AlertDialog(
-          backgroundColor: Colors.grey[900],
-          title: const Text(
-            'Stop Operation?',
-            style: TextStyle(color: Colors.white),
-          ),
-          content: const Text(
-            'Are you sure you want to Stop the Current Operation?',
-            style: TextStyle(color: Colors.white70),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
-            ),
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, true),
-              child: const Text(
-                'Yes, Stop',
-                style: TextStyle(color: Colors.red),
-              ),
-            ),
-          ],
-        ),
-      );
-
-      if (stopConfirm != true) {
-        setState(() {
-          _buttonDisabled = false;
-          _countdownText = '';
-        });
-        return;
-      }
-
-      await logoutFromNexus();
-      stopSendingLocation();
-      stopTimers();
-      setState(() {
-        _isLoggedIn = false;
-        _buttonDisabled = false;
-      });
-      return; // ✅ Exit here so login logic doesn’t run
-    }
-
-    // ✅ LOGIN confirmation (with countdown after confirmation)
-    final confirm = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: Colors.grey[900],
-        title: const Text(
-          'Confirm Login',
-          style: TextStyle(color: Colors.white),
-        ),
-        content: Text(
-          'Log to Nexus Server?\n\nDeployment ID: $deployment',
-          style: const TextStyle(color: Colors.white70),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('No', style: TextStyle(color: Colors.red)),
-          ),
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Yes', style: TextStyle(color: Colors.green)),
-          ),
-        ],
-      ),
-    );
-
-    if (confirm != true) return;
-
-    // 🕒 Countdown for login
-    setState(() {
-      _buttonDisabled = true;
-      _countdownText = 'Enabling in 3...';
-    });
-
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _countdownText = 'Enabling in 2...');
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _countdownText = 'Enabling in 1...');
-    await Future.delayed(const Duration(seconds: 1));
-    setState(() => _countdownText = '');
-
-    // ✅ Continue login logic
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('token', token);
-    await prefs.setString('deploymentID', deployment);
-
-    await loginToNexus();
-    await _loadStatus();
-    await startSendingLocation();
-    startTimers();
-
-    setState(() {
-      _isLoggedIn = true;
-      _buttonDisabled = false;
     });
   }
 
@@ -292,6 +176,7 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
                 TextField(
                   controller: tokenController,
                   focusNode: tokenFocusNode,
+                  enabled: _textFieldsEnabled,
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     hintText: 'Enter your Token',
@@ -301,6 +186,7 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
                 TextField(
                   controller: deploymentController,
                   focusNode: deploymentFocusNode,
+                  enabled: _textFieldsEnabled,
                   style: const TextStyle(color: Colors.white),
                   decoration: const InputDecoration(
                     hintText: 'Enter Deployment ID',
@@ -310,7 +196,32 @@ class _NexusLoginScreenState extends State<NexusLoginScreen> {
                 SizedBox(
                   height: 60,
                   child: ElevatedButton(
-                    onPressed: _buttonDisabled ? null : _handleLoginLogout,
+                    onPressed: _buttonDisabled
+                        ? null
+                        : () => handleLoginLogout(
+                            context: context,
+                            token: tokenController.text.trim(),
+                            deployment: deploymentController.text.trim(),
+                            isLoggedIn: _isLoggedIn,
+                            setState: setState,
+                            loginToNexus: loginToNexus,
+                            logoutFromNexus: logoutFromNexus,
+                            startSendingLocation: startSendingLocation,
+                            stopSendingLocation: stopSendingLocation,
+                            loadStatus: _loadStatus,
+
+                            startTimers: startTimers,
+                            stopTimers: stopTimers,
+                            updateLoginState: (value) =>
+                                setState(() => _isLoggedIn = value),
+                            updateButtonState: (value) =>
+                                setState(() => _buttonDisabled = value),
+                            updateCountdown: (value) =>
+                                setState(() => _countdownText = value),
+                            updateTextFieldEnabled: (value) =>
+                                setState(() => _textFieldsEnabled = value),
+                          ),
+
                     style: ElevatedButton.styleFrom(
                       backgroundColor: _isLoggedIn ? Colors.red : Colors.teal,
                     ),

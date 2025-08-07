@@ -15,7 +15,16 @@ Future<void> loginToNexus() async {
     'https://asia-southeast1-nexuspolice-13560.cloudfunctions.net/setUnit',
   );
 
-  final body = jsonEncode({"deploymentCode": deploymentID, "action": "login"});
+  final body = jsonEncode({
+    "deploymentCode": deploymentID,
+    "action": "login",
+    "call_sign": "R4A-211", // 🔒 Hardcoded Call Sign
+    "personnel": [
+      {"name": "Juan Dela Cruz", "phone": "09123456789"},
+    ],
+    "radioequipment": "Motorola GP328",
+    "videoequipment": "Body Cam Pro",
+  });
 
   final response = await http.post(
     url,
@@ -28,7 +37,6 @@ Future<void> loginToNexus() async {
 
   print("✅ Nexus Login: ${response.statusCode} - ${response.body}");
 
-  // 🔁 Start background tracking
   await startBackgroundTask();
 }
 
