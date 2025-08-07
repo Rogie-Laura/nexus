@@ -1,3 +1,4 @@
+import 'connection_helper.dart';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'nexus_service.dart';
@@ -77,6 +78,7 @@ Future<void> handleLoginLogout({
     await logoutFromNexus();
     await stopSendingLocation();
     stopTimers();
+    stopConnectionWatcher(); // 🛑 stop watching internet connection
 
     updateLoginState(false);
     updateButtonState(false);
@@ -127,6 +129,7 @@ Future<void> handleLoginLogout({
   await loadStatus();
   await startSendingLocation();
   startTimers();
+  startConnectionWatcher(); // 🔁 start watching internet connection
 
   updateLoginState(true);
   updateButtonState(false);
